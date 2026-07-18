@@ -89,6 +89,13 @@ export default function Home() {
   const heroOp = useTransform(scrollYProgress, [0, 0.6], [1, 0]);
 
   const heroProduct = products.find(p => p.slug === 'power-bank-20000mah') || products[0];
+ if (!heroProduct) {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      Chargement...
+    </div>
+  );
+}
   const featured = products.slice(0, 8);
   const bestSellers = products.filter(p => p.badge === 'BEST' || p.rating >= 4.7).slice(0, 8);
   const newArrivals = products.filter(p => p.badge === 'NEW');
