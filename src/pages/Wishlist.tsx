@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, ShoppingCart, Trash2, ArrowRight, Star } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
-
 export default function Wishlist() {
   const { t, lang, wishlist, toggleWishlist, addToCart, products } = useApp();
   const items = products.filter(p => wishlist.includes(p.id));

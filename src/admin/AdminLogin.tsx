@@ -19,20 +19,18 @@ export default function AdminLogin() {
     return <Navigate to={from} replace />;
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    setTimeout(() => {
-      const ok = loginAdmin(email, password);
-      setLoading(false);
-      if (ok) {
-        const from = (location.state as { from?: string })?.from || '/admin';
-        navigate(from, { replace: true });
-      } else {
-        setError('Email ou mot de passe incorrect.');
-      }
-    }, 400);
+    const ok = await loginAdmin(email, password);
+    setLoading(false);
+    if (ok) {
+      const from = (location.state as { from?: string })?.from || '/admin';
+      navigate(from, { replace: true });
+    } else {
+      setError('Email ou mot de passe incorrect.');
+    }
   };
 
   return (
@@ -74,7 +72,6 @@ export default function AdminLogin() {
           <button type="submit" disabled={loading} className="w-full py-2.5 rounded-lg text-[13px] font-bold bg-primary-500 text-white hover:bg-primary-600 shadow-sm transition-all disabled:opacity-60">
             {loading ? 'Connexion...' : 'Se connecter'}
           </button>
-          <p className="text-center text-[10px] text-gray-400 pt-1">Démo — admin@azoura.ma / azoura2026</p>
         </form>
       </motion.div>
     </div>

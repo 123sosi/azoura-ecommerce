@@ -1,5 +1,6 @@
 import { createContext, useContext, useReducer, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { products as staticCatalog, type Product } from '../data/products';
+import { supabase } from '../lib/supabaseClient';
 
 export interface CartItem {
   id: number;
@@ -190,7 +191,7 @@ interface AppState {
   updateAdminBrand: (id: string, data: Partial<AdminBrand>) => void;
   deleteAdminBrand: (id: string) => void;
   isAdminAuth: boolean;
-  loginAdmin: (email: string, password: string) => boolean;
+  loginAdmin: (email: string, password: string) => Promise<boolean>;
   logoutAdmin: () => void;
 }
 
@@ -220,6 +221,62 @@ function loadJSON<T>(key: string, fallback: T): T {
   try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; } catch { return fallback; }
 }
 
+// Maps a Supabase `products` row (snake_case) to the app's AdminProduct shape (camelCase).
+function rowToAdminProduct(row: any): AdminProduct {
+  return {
+    id: row.id,
+    slug: row.slug,
+    nameFr: row.name_fr,
+    nameEn: row.name_en,
+    descFr: row.desc_fr,
+    descEn: row.desc_en,
+    price: row.price,
+    oldPrice: row.old_price ?? undefined,
+    costPrice: row.cost_price,
+    category: row.category,
+    brand: row.brand ?? undefined,
+    sku: row.sku ?? '',
+    barcode: row.barcode ?? '',
+    stock: row.stock,
+    lowStockThreshold: row.low_stock_threshold,
+    weight: row.weight,
+    badge: row.badge ?? undefined,
+    images: row.images ?? [],
+    variants: row.variants ?? [],
+    metaTitle: row.meta_title ?? undefined,
+    metaDescription: row.meta_description ?? undefined,
+    active: row.active,
+    featured: row.featured,
+  };
+}
+
+// Maps a (partial) AdminProduct back to Supabase row shape for insert/update.
+function adminProductToRow(p: Partial<AdminProduct>): Record<string, any> {
+  const row: Record<string, any> = {};
+  if (p.slug !== undefined) row.slug = p.slug;
+  if (p.nameFr !== undefined) row.name_fr = p.nameFr;
+  if (p.nameEn !== undefined) row.name_en = p.nameEn;
+  if (p.descFr !== undefined) row.desc_fr = p.descFr;
+  if (p.descEn !== undefined) row.desc_en = p.descEn;
+  if (p.price !== undefined) row.price = p.price;
+  if (p.oldPrice !== undefined) row.old_price = p.oldPrice;
+  if (p.costPrice !== undefined) row.cost_price = p.costPrice;
+  if (p.category !== undefined) row.category = p.category;
+  if (p.brand !== undefined) row.brand = p.brand;
+  if (p.sku !== undefined) row.sku = p.sku;
+  if (p.barcode !== undefined) row.barcode = p.barcode;
+  if (p.stock !== undefined) row.stock = p.stock;
+  if (p.lowStockThreshold !== undefined) row.low_stock_threshold = p.lowStockThreshold;
+  if (p.weight !== undefined) row.weight = p.weight;
+  if (p.badge !== undefined) row.badge = p.badge;
+  if (p.images !== undefined) row.images = p.images;
+  if (p.variants !== undefined) row.variants = p.variants;
+  if (p.metaTitle !== undefined) row.meta_title = p.metaTitle;
+  if (p.metaDescription !== undefined) row.meta_description = p.metaDescription;
+  if (p.active !== undefined) row.active = p.active;
+  if (p.featured !== undefined) row.featured = p.featured;
+  return row;
+}
 // Converts an admin-edited product into the public-facing Product shape,
 // falling back to the static catalog entry (by id) for display-only fields
 // that the admin panel doesn't manage (rating, specs, features, colors...).
@@ -250,7 +307,6 @@ function adminToProduct(ap: AdminProduct, reviews: AdminReview[]): Product {
     features: base?.features ?? { fr: [], en: [] },
   };
 }
-
 const mkTimeline = (status: string, date: string): Order['timeline'] => {
   const t: Order['timeline'] = [{ status: 'pending', date, note: 'Commande reçue' }];
   if (['processing','shipped','delivered'].includes(status)) t.push({ status:'processing', date, note:'En préparation' });
@@ -298,19 +354,6 @@ const DEMO_NOTIFICATIONS: AdminNotification[] = [
   { id:'N6', text:'Stock faible : Chargeur 65W GaN — 3 restants', time:'Il y a 2 jours', read:true, type:'stock' },
 ];
 
-const DEMO_ADMIN_PRODUCTS: AdminProduct[] = [
-  { id:1, slug:'power-bank-20000mah', brand:'azoura', nameFr:'Power Bank 20000mAh', nameEn:'20000mAh Power Bank', descFr:'Notre power bank phare.', descEn:'Our flagship power bank.', price:249, oldPrice:349, costPrice:120, category:'power-banks', sku:'AZ-PB-2000', barcode:'6941234567890', stock:45, lowStockThreshold:10, weight:350, badge:'BEST', images:['https://images.pexels.com/photos/4526407/pexels-photo-4526407.jpeg?auto=compress&cs=tinysrgb&w=600'], variants:[{name:'Couleur',options:['Noir','Blanc','Bleu']}], active:true, featured:true },
-  { id:2, slug:'chargeur-rapide-65w', brand:'ugreen', nameFr:'Chargeur Rapide 65W GaN', nameEn:'65W GaN Fast Charger', descFr:'Chargeur compact GaN III.', descEn:'Compact GaN III charger.', price:199, oldPrice:299, costPrice:85, category:'chargers', sku:'AZ-CH-065W', barcode:'6941234567891', stock:3, lowStockThreshold:10, weight:120, badge:'NEW', images:['https://images.pexels.com/photos/12880803/pexels-photo-12880803.jpeg?auto=compress&cs=tinysrgb&w=600'], variants:[{name:'Couleur',options:['Blanc','Noir']}], active:true, featured:true },
-  { id:3, slug:'cable-usb-c-2m', brand:'baseus', nameFr:'Câble USB-C Tressé 2m', nameEn:'2m Braided USB-C Cable', descFr:'Câble tressé 100W PD.', descEn:'100W PD braided cable.', price:89, costPrice:25, category:'cables', sku:'AZ-CB-002M', barcode:'6941234567892', stock:5, lowStockThreshold:15, weight:60, images:['https://images.pexels.com/photos/18641665/pexels-photo-18641665.png?auto=compress&cs=tinysrgb&w=600'], variants:[{name:'Couleur',options:['Noir','Gris','Rouge']},{name:'Longueur',options:['1m','2m','3m']}], active:true, featured:false },
-  { id:4, slug:'ecouteurs-sans-fil-pro', brand:'azoura', nameFr:'Écouteurs Sans Fil Pro', nameEn:'Pro Wireless Earbuds', descFr:'ANC + 36h autonomie.', descEn:'ANC + 36h battery.', price:499, oldPrice:699, costPrice:200, category:'audio', sku:'AZ-AU-EWFP', barcode:'6941234567893', stock:22, lowStockThreshold:8, weight:45, badge:'NEW', images:['https://images.pexels.com/photos/3394653/pexels-photo-3394653.jpeg?auto=compress&cs=tinysrgb&w=600'], variants:[{name:'Couleur',options:['Blanc','Noir']}], active:true, featured:true },
-  { id:5, slug:'chargeur-sans-fil-15w', brand:'anker', nameFr:'Chargeur Sans Fil 15W', nameEn:'15W Wireless Charger', descFr:'Qi2 MagSafe compatible.', descEn:'Qi2 MagSafe compatible.', price:199, oldPrice:249, costPrice:70, category:'chargers', sku:'AZ-CH-WL15', barcode:'6941234567894', stock:31, lowStockThreshold:10, weight:95, badge:'SALE', images:['https://images.pexels.com/photos/12564670/pexels-photo-12564670.jpeg?auto=compress&cs=tinysrgb&w=600'], variants:[], active:true, featured:false },
-  { id:6, slug:'coque-iphone-premium', brand:'apple', nameFr:'Coque iPhone Premium', nameEn:'Premium iPhone Case', descFr:'MagSafe + MIL-STD-810G.', descEn:'MagSafe + MIL-STD-810G.', price:149, costPrice:40, category:'cases', sku:'AZ-CS-IP15', barcode:'6941234567895', stock:67, lowStockThreshold:20, weight:35, images:['https://images.pexels.com/photos/7989741/pexels-photo-7989741.jpeg?auto=compress&cs=tinysrgb&w=600'], variants:[{name:'Couleur',options:['Noir','Transparent','Bleu Navy','Vert']}], active:true, featured:false },
-  { id:7, slug:'casque-bluetooth-anc', brand:'anker', nameFr:'Casque Bluetooth ANC', nameEn:'ANC Bluetooth Headphones', descFr:'Hi-Res Audio + 60h.', descEn:'Hi-Res Audio + 60h.', price:699, oldPrice:899, costPrice:280, category:'audio', sku:'AZ-AU-CBAN', barcode:'6941234567896', stock:18, lowStockThreshold:5, weight:260, badge:'BEST', images:['https://images.pexels.com/photos/3394650/pexels-photo-3394650.jpeg?auto=compress&cs=tinysrgb&w=600'], variants:[{name:'Couleur',options:['Blanc','Noir']}], active:true, featured:true },
-  { id:8, slug:'chargeur-voiture-45w', brand:'baseus', nameFr:'Chargeur Voiture 45W', nameEn:'45W Car Charger', descFr:'Double USB-C PD.', descEn:'Dual USB-C PD.', price:149, costPrice:55, category:'chargers', sku:'AZ-CH-CR45', barcode:'6941234567897', stock:40, lowStockThreshold:10, weight:30, images:['https://images.pexels.com/photos/19117855/pexels-photo-19117855.jpeg?auto=compress&cs=tinysrgb&w=600'], variants:[], active:true, featured:false },
-  { id:9, slug:'power-bank-10000mah', brand:'azoura', nameFr:'Power Bank Slim 10000mAh', nameEn:'Slim 10000mAh Power Bank', descFr:'Ultra-fin 15mm.', descEn:'Ultra-thin 15mm.', price:149, oldPrice:199, costPrice:60, category:'power-banks', sku:'AZ-PB-1000', barcode:'6941234567898', stock:0, lowStockThreshold:10, weight:180, badge:'SALE', images:['https://images.pexels.com/photos/4765366/pexels-photo-4765366.jpeg?auto=compress&cs=tinysrgb&w=600'], variants:[{name:'Couleur',options:['Noir','Blanc','Rose']}], active:true, featured:false },
-  { id:15, slug:'power-bank-30000mah', brand:'ugreen', nameFr:'Power Bank 30000mAh', nameEn:'30000mAh Power Bank', descFr:'100W PD + LCD.', descEn:'100W PD + LCD.', price:399, oldPrice:499, costPrice:180, category:'power-banks', sku:'AZ-PB-3000', barcode:'6941234567904', stock:12, lowStockThreshold:5, weight:580, badge:'NEW', images:['https://images.pexels.com/photos/18311089/pexels-photo-18311089.jpeg?auto=compress&cs=tinysrgb&w=600'], variants:[{name:'Couleur',options:['Noir','Bleu']}], active:true, featured:true },
-];
-
 const DEMO_REVIEWS: AdminReview[] = [
   { id:'R1', productId:1, productName:'Power Bank 20000mAh', customerName:'Ahmed B.', rating:5, text:'Qualité exceptionnelle ! Charge ultra rapide.', date:'2024-12-15', status:'approved', verified:true },
   { id:'R2', productId:4, productName:'Écouteurs Sans Fil Pro', customerName:'Fatima Z.', rating:5, text:'Son cristallin et ANC impressionnant.', date:'2025-01-08', status:'approved', verified:true },
@@ -344,7 +387,6 @@ const DEMO_BRANDS: AdminBrand[] = [
   { id:'samsung', nameFr:'Samsung', nameEn:'Samsung', slug:'samsung', logo:'', active:true, order:6 },
 ];
 
-const ADMIN_CREDENTIALS = { email: 'admin@azoura.ma', password: 'azoura2026' };
 
 const DEFAULT_SETTINGS: Record<string, string> = {
   siteName: 'AZOURA', tagline: 'Connect. Charge. Go.', email: 'contact@azoura.ma', phone: '+212 522 123 456', address: '123 Boulevard Mohammed V, Casablanca, Maroc', currency: 'MAD', taxRate: '20', metaTitle: 'AZOURA | Connect. Charge. Go.', metaDesc: 'Accessoires mobiles premium au Maroc.', ogImage: '', whatsapp: '+212522123456', instagram: 'azoura.ma', facebook: 'azoura.ma', maintenanceMode: 'false', codEnabled: 'true', cardEnabled: 'true',
@@ -364,17 +406,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [coupons, setCoupons] = useState<Coupon[]>(() => loadJSON('az-coupons', DEMO_COUPONS));
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [notifications, setNotifications] = useState<AdminNotification[]>(() => loadJSON('az-notif', DEMO_NOTIFICATIONS));
-  const [adminProducts, setAdminProducts] = useState<AdminProduct[]>(() => loadJSON('az-admin-prod', DEMO_ADMIN_PRODUCTS));
+  const [adminProducts, setAdminProducts] = useState<AdminProduct[]>([]);
   const [adminReviews, setAdminReviews] = useState<AdminReview[]>(() => loadJSON('az-admin-rev', DEMO_REVIEWS));
   const [shippingZones, setShippingZones] = useState<ShippingZone[]>(() => loadJSON('az-shipping', DEMO_SHIPPING));
   const [adminCategories, setAdminCategories] = useState<AdminCategory[]>(() => loadJSON('az-admin-cats', DEMO_ADMIN_CATS));
   const [siteSettings, setSiteSettings] = useState<Record<string, string>>(() => loadJSON('az-settings', DEFAULT_SETTINGS));
   const [adminBrands, setAdminBrands] = useState<AdminBrand[]>(() => loadJSON('az-admin-brands', DEMO_BRANDS));
-  const [isAdminAuth, setIsAdminAuth] = useState<boolean>(() => sessionStorage.getItem('az-admin-auth') === '1');
+  const [isAdminAuth, setIsAdminAuth] = useState<boolean>(false);
 
-  // Public catalog shown across the site — always derived live from adminProducts,
-  // so any change made in the admin panel (price, stock, name, images, active...)
-  // is reflected immediately on the storefront. Only active products are shown.
+  // Keep isAdminAuth in sync with the real Supabase session (not sessionStorage anymore).
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setIsAdminAuth(!!data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAdminAuth(!!session);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // Fetch products from Supabase. Anonymous visitors only get active=true rows (RLS),
+  // logged-in admins get everything — so this refetches whenever admin auth changes.
+  useEffect(() => {
+    let mounted = true;
+    supabase.from('products').select('*').order('id').then(({ data, error }) => {
+      if (!mounted) return;
+      if (error) { console.error('Failed to load products from Supabase:', error.message); return; }
+      setAdminProducts((data ?? []).map(rowToAdminProduct));
+    });
+    return () => { mounted = false; };
+  }, [isAdminAuth]);
+
   const products = useMemo(
     () => adminProducts.filter(p => p.active).map(p => adminToProduct(p, adminReviews)),
     [adminProducts, adminReviews]
@@ -390,7 +450,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => { localStorage.setItem('az-customers', JSON.stringify(customers)); }, [customers]);
   useEffect(() => { localStorage.setItem('az-coupons', JSON.stringify(coupons)); }, [coupons]);
   useEffect(() => { localStorage.setItem('az-notif', JSON.stringify(notifications)); }, [notifications]);
-  useEffect(() => { localStorage.setItem('az-admin-prod', JSON.stringify(adminProducts)); }, [adminProducts]);
   useEffect(() => { localStorage.setItem('az-admin-rev', JSON.stringify(adminReviews)); }, [adminReviews]);
   useEffect(() => { localStorage.setItem('az-shipping', JSON.stringify(shippingZones)); }, [shippingZones]);
   useEffect(() => { localStorage.setItem('az-admin-cats', JSON.stringify(adminCategories)); }, [adminCategories]);
@@ -427,9 +486,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addNotification = useCallback((n: Omit<AdminNotification, 'id'>) => setNotifications(p => [{ ...n, id: `N${Date.now()}` }, ...p]), []);
   const markNotificationRead = useCallback((id: string) => setNotifications(p => p.map(n => n.id === id ? { ...n, read:true } : n)), []);
   const clearNotifications = useCallback(() => setNotifications(p => p.map(n => ({ ...n, read:true }))), []);
-  const addAdminProduct = useCallback((p: AdminProduct) => setAdminProducts(prev => [...prev, p]), []);
-  const updateAdminProduct = useCallback((id: number, data: Partial<AdminProduct>) => setAdminProducts(p => p.map(x => x.id === id ? { ...x, ...data } : x)), []);
-  const deleteAdminProduct = useCallback((id: number) => setAdminProducts(p => p.filter(x => x.id !== id)), []);
+  const addAdminProduct = useCallback((p: AdminProduct) => {
+    setAdminProducts(prev => [...prev, p]); // optimistic
+    supabase.from('products').insert(adminProductToRow(p)).select().single().then(({ data, error }) => {
+      if (error) { console.error('Insert product failed:', error.message); setAdminProducts(prev => prev.filter(x => x !== p)); return; }
+      setAdminProducts(prev => prev.map(x => x === p ? rowToAdminProduct(data) : x));
+    });
+  }, []);
+  const updateAdminProduct = useCallback((id: number, data: Partial<AdminProduct>) => {
+    setAdminProducts(p => p.map(x => x.id === id ? { ...x, ...data } : x)); // optimistic
+    supabase.from('products').update(adminProductToRow(data)).eq('id', id).then(({ error }) => {
+      if (error) console.error('Update product failed:', error.message);
+    });
+  }, []);
+  const deleteAdminProduct = useCallback((id: number) => {
+    setAdminProducts(p => p.filter(x => x.id !== id)); // optimistic
+    supabase.from('products').delete().eq('id', id).then(({ error }) => {
+      if (error) console.error('Delete product failed:', error.message);
+    });
+  }, []);
   const updateReview = useCallback((id: string, data: Partial<AdminReview>) => setAdminReviews(p => p.map(r => r.id === id ? { ...r, ...data } : r)), []);
   const updateShippingZone = useCallback((id: string, data: Partial<ShippingZone>) => setShippingZones(p => p.map(z => z.id === id ? { ...z, ...data } : z)), []);
   const addShippingZone = useCallback((z: ShippingZone) => setShippingZones(p => [...p, z]), []);
@@ -441,12 +516,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addAdminBrand = useCallback((b: AdminBrand) => setAdminBrands(p => [...p, b]), []);
   const updateAdminBrand = useCallback((id: string, data: Partial<AdminBrand>) => setAdminBrands(p => p.map(b => b.id === id ? { ...b, ...data } : b)), []);
   const deleteAdminBrand = useCallback((id: string) => setAdminBrands(p => p.filter(b => b.id !== id)), []);
-  const loginAdmin = useCallback((email: string, password: string) => {
-    const ok = email.trim().toLowerCase() === ADMIN_CREDENTIALS.email && password === ADMIN_CREDENTIALS.password;
-    if (ok) { setIsAdminAuth(true); sessionStorage.setItem('az-admin-auth', '1'); }
-    return ok;
+  const loginAdmin = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    return !error;
   }, []);
-  const logoutAdmin = useCallback(() => { setIsAdminAuth(false); sessionStorage.removeItem('az-admin-auth'); }, []);
+  const logoutAdmin = useCallback(() => { supabase.auth.signOut(); }, []);
 
   return (
     <Ctx.Provider value={{ products, cart, addToCart, removeFromCart, updateQuantity, clearCart, cartTotal, cartCount, wishlist, toggleWishlist, isInWishlist, compareList, toggleCompare, isInCompare, isDark, toggleTheme, lang, setLang, t, searchQuery, setSearchQuery, recentlyViewed, addRecentlyViewed, showCookie, acceptCookies, orders, addOrder, updateOrder, deleteOrder, customers, updateCustomer, coupons, addCoupon, updateCoupon, deleteCoupon, appliedCoupon, applyCoupon:applyCouponFn, removeCoupon, notifications, addNotification, markNotificationRead, clearNotifications, adminProducts, addAdminProduct, updateAdminProduct, deleteAdminProduct, adminReviews, updateReview, shippingZones, updateShippingZone, addShippingZone, deleteShippingZone, adminCategories, addAdminCategory, updateAdminCategory, deleteAdminCategory, siteSettings, updateSiteSettings, adminBrands, addAdminBrand, updateAdminBrand, deleteAdminBrand, isAdminAuth, loginAdmin, logoutAdmin }}>

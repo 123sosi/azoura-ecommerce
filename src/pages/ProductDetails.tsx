@@ -3,7 +3,6 @@ import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Star, Heart, ShoppingCart, Minus, Plus, Truck, Shield, RotateCcw, Check, ChevronRight, GitCompareArrows, Share2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-
 import ProductCard from '../components/ProductCard';
 
 export default function ProductDetails() {

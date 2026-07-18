@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom';
 import { GitCompareArrows, ShoppingCart, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
-
 export default function Compare() {
   const { t, lang, compareList, toggleCompare, addToCart, products } = useApp();
   const items = compareList.map(id => products.find(p => p.id === id)).filter(Boolean) as typeof products;
